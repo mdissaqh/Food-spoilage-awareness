@@ -10,7 +10,7 @@ class FoodItem(BaseModel):
     name: str
     weight: float
     nutrition: float
-    expiry_days: int
+    expiry_hours: int
 
 class OptimizeRequest(BaseModel):
     capacity: float
@@ -21,31 +21,24 @@ def optimize_knapsack(req: OptimizeRequest):
     if not req.items:
         return {"selected_ids": [], "total_weight": 0, "total_priority": 0}
 
-    # 1. Initialize Constrained Quadratic Model
     cqm = dimod.ConstrainedQuadraticModel()
-    
-    # 2. Create binary variables (1 = pack in truck, 0 = leave in warehouse)
     x = {item.id: dimod.Binary(item.id) for item in req.items}
     
-    # 3. Define Objective: Maximize Priority 
-    # Priority formula = Nutrition / Expiry (We use negative because CQM minimizes by default)
-    objective = sum(- (item.nutrition / max(item.expiry_days, 1)) * x[item.id] for item in req.items)
+    # Objective: Maximize Priority (Nutrition / ExpiryHours)
+    objective = sum(- (item.nutrition / max(item.expiry_hours, 1)) * x[item.id] for item in req.items)
     cqm.set_objective(objective)
     
-    # 4. Define Constraint: Total weight must be <= Truck Capacity
+    # Constraint: Weight
     cqm.add_constraint(sum(item.weight * x[item.id] for item in req.items) <= req.capacity, label='capacity')
     
-    # 5. Convert to Binary Quadratic Model (BQM) to run on our solver
     try:
         bqm, invert = dimod.cqm_to_bqm(cqm)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to build quantum model.")
 
-    # 6. Solve using Simulated Annealing (Quantum-Inspired)
     sampler = neal.SimulatedAnnealingSampler()
-    sampleset = sampler.sample(bqm, num_reads=100) # Run 100 iterations
+    sampleset = sampler.sample(bqm, num_reads=100)
     
-    # Extract the best solution that didn't break our weight constraint
     feasible_samples = [s for s in sampleset.data(name='sample') if cqm.check_feasible(s.sample)]
     
     if not feasible_samples:
@@ -55,5 +48,3 @@ def optimize_knapsack(req: OptimizeRequest):
     selected_ids = [item_id for item_id, selected in best_sample.items() if selected == 1]
     
     return {"selected_ids": selected_ids}
-
-# To run later: uvicorn main:app --reload --port 8000
