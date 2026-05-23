@@ -2,7 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const axios = require('axios');
-const { ChatGoogleGenerativeAI } = require('@langchain/google-genai');
+const { ChatMistralAI } = require('@langchain/mistralai');
 const { PromptTemplate } = require('@langchain/core/prompts');
 require('dotenv').config();
 
@@ -42,7 +42,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// --- GEMMA AI INFERENCE ROUTE ---
+// --- MISTRAL AI INFERENCE ROUTE ---
 app.post('/api/analyze-food', async (req, res) => {
   const { foodName, createdAt } = req.body;
   
@@ -50,22 +50,27 @@ app.post('/api/analyze-food', async (req, res) => {
   console.log(`[AI Debug] 1. Analyzing: "${foodName}" | Created: ${createdAt}`);
 
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY is missing from .env");
+    if (!process.env.MISTRAL_API_KEY) {
+      throw new Error("MISTRAL_API_KEY is missing from .env");
     }
 
-    // 1. Setup LangChain with Google AI Studio Gemma Model
-    const llm = new ChatGoogleGenerativeAI({
-      modelName: "gemma-4-31b", // Update to "gemma-2-27b-it" if Google API rejects this string
+    // 1. Setup LangChain with Mistral Model
+    const llm = new ChatMistralAI({
+      model: "mistral-small-latest",
       temperature: 0.1, 
-      apiKey: process.env.GEMINI_API_KEY
+      apiKey: process.env.MISTRAL_API_KEY
     });
 
+    // CRITICAL FIX: Use double curly braces {{ }} to escape JSON in PromptTemplate
     const template = `
     You are a professional food science AI.
     Determine the average nutrition score (1-100) and the TOTAL shelf life in hours for the following food item at room temperature.
-    Respond ONLY with a valid JSON object in this exact format. DO NOT use markdown blocks or formatting.
-    {"nutritionScore": 88, "totalShelfLifeHours": 72}
+    Respond ONLY with a valid JSON object in this exact format. DO NOT use markdown blocks, backticks, or formatting.
+
+    {{
+      "nutritionScore": 88,
+      "totalShelfLifeHours": 72
+    }}
     
     Food Item: {food}
     `;
@@ -73,36 +78,51 @@ app.post('/api/analyze-food', async (req, res) => {
     const prompt = PromptTemplate.fromTemplate(template);
     const chain = prompt.pipe(llm);
     
-    console.log(`[AI Debug] 2. Calling Google AI Studio (Gemma)...`);
+    console.log(`[AI Debug] 2. Calling Mistral API...`);
     
     // 2. Execute AI Call
     const response = await chain.invoke({ food: foodName });
     
-    // 3. Extract Raw Text
-    const rawText = typeof response.content === 'string' ? response.content : response.text;
-    console.log(`\n[AI Debug] 3. Gemma Raw Response:\n${rawText}\n`);
+    // 3. Log the Raw Response Object deeply
+    console.log(`[AI Debug] 3. Mistral Raw Response Object:`, JSON.stringify(response, null, 2));
 
-    // 4. Strict JSON Parsing (Stripping Markdown)
-    // The regex matches from the first '{' to the last '}'
-    const match = rawText.match(/\{[\s\S]*\}/);
-    if (!match) {
-      throw new Error("Could not locate JSON brackets {} in the Gemma response.");
+    // 4. Safe Text Extraction
+    let text = "";
+    if (response && response.content) {
+      text = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    } else if (response && typeof response === 'string') {
+      text = response;
+    } else {
+      throw new Error("Mistral response content is undefined or empty. Check API response structure.");
     }
     
-    // Remove any accidental markdown backticks just in case
-    const cleanJsonStr = match[0].replace(/```json/gi, '').replace(/```/g, '').trim();
-    const parsedData = JSON.parse(cleanJsonStr);
+    console.log(`\n[AI Debug] 4. Extracted AI Text:\n${text}\n`);
+
+    // 5. Clean and Parse JSON securely
+    let cleanedText = text;
+    if (cleanedText) {
+      // Safely strip markdown code blocks
+      cleanedText = cleanedText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    }
     
-    console.log(`[AI Debug] 4. Parsed AI JSON:`, parsedData);
+    console.log(`[AI Debug] 5. Cleaned Text:\n${cleanedText}\n`);
+
+    const match = cleanedText.match(/\{[\s\S]*\}/);
+    if (!match) {
+      throw new Error("Could not locate valid JSON brackets {} in the cleaned Mistral response.");
+    }
+    
+    const parsedData = JSON.parse(match[0]);
+    console.log(`[AI Debug] 6. Parsed JSON:`, parsedData);
 
     const nutritionScore = parseInt(parsedData.nutritionScore);
     const totalShelfLifeHours = parseInt(parsedData.totalShelfLifeHours);
 
     if (isNaN(nutritionScore) || isNaN(totalShelfLifeHours)) {
-      throw new Error("Gemma returned invalid or NaN values for nutrition or expiry.");
+      throw new Error("Mistral returned invalid or missing numbers for nutrition or shelf life.");
     }
 
-    // 5. Dynamic Time Calculation
+    // 6. Dynamic Time Calculation based on Provider's provided timestamp
     const createdDate = new Date(createdAt);
     const currentDate = new Date();
     
@@ -112,25 +132,25 @@ app.post('/api/analyze-food', async (req, res) => {
     let remainingHours = Math.round(totalShelfLifeHours - diffInHours);
     if (remainingHours < 0) remainingHours = 0;
 
-    console.log(`[AI Debug] 5. Time Math: Total Life (${totalShelfLifeHours}h) - Elapsed (${diffInHours.toFixed(1)}h) = Remaining (${remainingHours}h)`);
+    console.log(`[AI Debug] 7. Time Math: Total Life (${totalShelfLifeHours}h) - Elapsed (${diffInHours.toFixed(1)}h) = Remaining (${remainingHours}h)`);
     console.log(`=========================================\n`);
 
+    // 7. Return actual dynamic AI generation
     res.json({
       nutritionScore,
       expectedExpiryHours: remainingHours
     });
 
   } catch (error) {
-    console.error(`\n[FATAL ERROR] Gemma Error:`, error.message);
+    console.error(`\n[FATAL ERROR] Mistral Error:`, error.message);
     if (error.response && error.response.data) {
-       console.error(`[Google API Data]:`, error.response.data);
+       console.error(`[Mistral API Data]:`, error.response.data);
     }
     
-    const reason = error.message;
-    console.log(`[AI Debug] Fallback Reason: ${reason}`);
+    console.log(`[AI Debug] Fallback Reason: API genuinely failed, threw invalid JSON, or timed out.`);
     console.log(`=========================================\n`);
     
-    // Safe Fallback ONLY executed if the API genuinely fails
+    // Safe Fallback ONLY executed if the API genuinely crashes
     res.json({ nutritionScore: 50, expectedExpiryHours: 48 });
   }
 });

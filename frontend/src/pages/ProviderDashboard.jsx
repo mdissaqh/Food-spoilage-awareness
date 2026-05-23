@@ -67,7 +67,7 @@ export default function ProviderDashboard() {
       setAiData(res.data);
     } catch (err) {
       console.error("AI Analysis failed", err);
-      alert("AI Analysis failed. Check backend logs and API Key.");
+      alert("AI Analysis failed. Check backend logs and Mistral API Key.");
     }
     setIsAnalyzing(false);
   };
@@ -196,7 +196,7 @@ export default function ProviderDashboard() {
                 ) : (
                   <Cpu size={20} />
                 )}
-                {isAnalyzing ? 'Gemma Analyzing...' : 'Analyze with AI'}
+                {isAnalyzing ? 'Mistral AI Analyzing...' : 'Analyze with AI'}
               </button>
             ) : (
               <div style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6', padding: '1rem', borderRadius: '0.5rem' }}>
