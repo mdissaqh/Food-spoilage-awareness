@@ -46,6 +46,7 @@ graph TD
     G -->|Returns Optimal IDs| F
     F -->|Passes IDs| B
     B -->|Returns Populated Manifest| E
+```
 
 ---
 
@@ -66,5 +67,3 @@ MONGO_URI=mongodb://127.0.0.1:27017/quantum_knapsack
 # Obtain this token directly from your dashboard at console.mistral.ai
 MISTRAL_API_KEY=your_actual_mistral_api_key_here
 ```
-
----
