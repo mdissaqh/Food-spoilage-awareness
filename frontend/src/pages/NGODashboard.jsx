@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Cpu, Truck, Package, AlertTriangle, LogOut, MapPin } from 'lucide-react';
+import { Cpu, Truck, Package, AlertTriangle, LogOut, MapPin, Clock } from 'lucide-react';
 
-// Custom Tooltip component to show Provider details safely
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
@@ -14,11 +13,14 @@ const CustomTooltip = ({ active, payload, label }) => {
         <p style={{ fontWeight: 'bold', color: '#60a5fa', marginBottom: '0.5rem' }}>{label}</p>
         <p style={{ color: '#fff' }}>Nutrition: {data.nutritionScore}</p>
         <p style={{ color: '#fff' }}>Weight: {data.weight}kg</p>
-        <p style={{ color: '#f87171' }}>Expires: {data.expectedExpiryHours}h</p>
+        <p style={{ color: '#f87171' }}>Remaining Life: {data.expectedExpiryHours}h</p>
         <hr style={{ borderColor: 'rgba(255,255,255,0.1)', margin: '0.5rem 0' }} />
         <p style={{ color: '#94a3b8', fontSize: '0.75rem' }}><MapPin size={12} style={{display:'inline'}}/> Pickup From:</p>
         <p style={{ color: '#fff', fontSize: '0.85rem' }}>{data.providerName}</p>
-        <p style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{data.addressLine}, {data.city}</p>
+        <p style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{data.addressLine}, {data.city} {data.pincode}</p>
+        <p style={{ color: '#64748b', fontSize: '0.7rem', marginTop: '0.25rem' }}>
+          <Clock size={10} style={{display:'inline'}}/> Listed: {new Date(data.createdAt).toLocaleString()}
+        </p>
       </div>
     );
   }
@@ -33,14 +35,14 @@ export default function NGODashboard() {
   const [optimizedLoad, setOptimizedLoad] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
 
-  const fetchInventory = async () => {
+  const fetchInventory = useCallback(async () => {
     try {
       const res = await api.get('/food');
       setInventory(res.data);
     } catch (err) {
       console.error("Failed to fetch inventory", err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user');
@@ -55,7 +57,7 @@ export default function NGODashboard() {
         fetchInventory();
       }
     }
-  }, [navigate]);
+  }, [navigate, fetchInventory]);
 
   const handleLogout = () => {
     localStorage.removeItem('user');
@@ -130,9 +132,12 @@ export default function NGODashboard() {
                       {item.expectedExpiryHours}h left
                     </div>
                   </div>
-                  <p className="item-meta">Weight: {item.weight}kg | Nutri-Score: {item.nutritionScore}</p>
-                  <div className="provider-meta" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.5rem' }}>
-                    <MapPin size={12} /> {item.providerName} - {item.addressLine}, {item.city}
+                  <p className="item-meta">Weight: {item.weight}kg | AI Nutri-Score: {item.nutritionScore}</p>
+                  <p className="item-meta" style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.25rem' }}>
+                    <Clock size={10} style={{display:'inline'}}/> Listed: {new Date(item.createdAt).toLocaleString()}
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.75rem', color: '#60a5fa', fontSize: '0.8rem' }}>
+                    <MapPin size={12} /> {item.providerName} - {item.addressLine}, {item.city} {item.pincode}
                   </div>
                 </div>
               ))}
