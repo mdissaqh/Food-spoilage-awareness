@@ -179,7 +179,7 @@ export default function NGODashboard() {
           )}
 
           <div className="glass-panel">
-            <h2 className="panel-title">City-Wide Available Donations</h2>
+            <h2 className="panel-title">Nearest Location Available Donations</h2>
             <div className="inventory-list">
               {inventory.length === 0 ? <p style={{color: '#94a3b8'}}>No active donations in your city.</p> : null}
               {inventory.map(item => (
