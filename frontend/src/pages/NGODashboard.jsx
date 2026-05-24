@@ -4,6 +4,10 @@ import api from '../api';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Cpu, Truck, Package, AlertTriangle, LogOut, MapPin, Clock, Bike, Leaf } from 'lucide-react';
+import { getDistance } from 'geolib';
+import FoodMap from '../components/FoodMap';
+
+const NGO_LOCATION = { latitude: 12.9177, longitude: 77.6238 }; // Default Bangalore Base
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
@@ -17,7 +21,7 @@ const CustomTooltip = ({ active, payload, label }) => {
         <hr style={{ borderColor: 'rgba(255,255,255,0.1)', margin: '0.5rem 0' }} />
         <p style={{ color: '#94a3b8', fontSize: '0.75rem' }}><MapPin size={12} style={{display:'inline'}}/> Pickup From:</p>
         <p style={{ color: '#fff', fontSize: '0.85rem' }}>{data.providerName}</p>
-        <p style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{data.addressLine}, {data.city} {data.pincode}</p>
+        <p style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{data.addressLine}, {data.city}</p>
         <p style={{ color: '#64748b', fontSize: '0.7rem', marginTop: '0.25rem' }}>
           <Clock size={10} style={{display:'inline'}}/> Listed: {new Date(data.createdAt).toLocaleString()}
         </p>
@@ -38,7 +42,17 @@ export default function NGODashboard() {
   const fetchInventory = useCallback(async () => {
     try {
       const res = await api.get('/food');
-      setInventory(res.data);
+      
+      // Calculate distances and strictly filter items within 10km (10000 meters) radius
+      const itemsWithDistance = res.data.map(item => {
+        const dist = getDistance(
+          { latitude: NGO_LOCATION.latitude, longitude: NGO_LOCATION.longitude },
+          { latitude: item.latitude || 12.9716, longitude: item.longitude || 77.5946 }
+        );
+        return { ...item, distance: dist };
+      }).filter(item => item.distance <= 10000);
+
+      setInventory(itemsWithDistance);
     } catch (err) {
       console.error("Failed to fetch inventory", err);
     }
@@ -64,7 +78,6 @@ export default function NGODashboard() {
     navigate('/login');
   };
 
-  // Calculate total city weight to determine vehicle recommendation
   const totalCityWeight = inventory.reduce((sum, item) => sum + item.weight, 0);
   const isBikeRecommended = inventory.length > 0 && totalCityWeight <= 10;
 
@@ -73,10 +86,13 @@ export default function NGODashboard() {
     try {
       await new Promise(r => setTimeout(r, 1500)); 
       
-      // If a bike is recommended, strictly constrain the optimization logic to 10kg
       const optimizeCapacity = isBikeRecommended ? 10 : capacity;
       
-      const res = await api.post('/optimize', { capacity: optimizeCapacity });
+      // Send the distance-filtered inventory directly to backend
+      const res = await api.post('/optimize', { 
+        capacity: optimizeCapacity, 
+        items: inventory 
+      });
       setOptimizedLoad(res.data);
     } catch (err) {
       console.error(err);
@@ -87,6 +103,7 @@ export default function NGODashboard() {
 
   const totalWeight = optimizedLoad ? optimizedLoad.reduce((acc, curr) => acc + curr.weight, 0) : 0;
   const highRiskSaved = optimizedLoad ? optimizedLoad.filter(i => i.expectedExpiryHours <= 24).length : 0;
+  const optimizedIds = optimizedLoad ? optimizedLoad.map(item => item._id) : [];
 
   if (!user) return null;
 
@@ -105,24 +122,17 @@ export default function NGODashboard() {
       <div className="dashboard-grid">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
-          {/* DYNAMIC VEHICLE RECOMMENDATION PANEL */}
+          <FoodMap ngoLocation={NGO_LOCATION} providers={inventory} optimizedIds={optimizedIds} />
+
           {isBikeRecommended ? (
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }} 
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.4 }}
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4 }}
               className="glass-panel"
-              style={{ 
-                background: 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(5,150,105,0.05))', 
-                border: '1px solid rgba(16,185,129,0.3)',
-                boxShadow: '0 4px 30px rgba(16,185,129,0.1)'
-              }}
+              style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(5,150,105,0.05))', border: '1px solid rgba(16,185,129,0.3)', boxShadow: '0 4px 30px rgba(16,185,129,0.1)' }}
             >
-              <h2 className="panel-title" style={{ color: '#34d399' }}>
-                <Bike color="#34d399" /> Bike Recommended
-              </h2>
+              <h2 className="panel-title" style={{ color: '#34d399' }}><Bike color="#34d399" /> Bike Recommended</h2>
               <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1.25rem', lineHeight: '1.5' }}>
-                Lightweight donations detected. A bike pickup is more efficient than deploying a truck.
+                Lightweight donations detected within 10km. A bike pickup is more efficient than deploying a truck.
               </p>
               
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
@@ -132,29 +142,17 @@ export default function NGODashboard() {
                 </div>
                 <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid rgba(16,185,129,0.2)' }}>
                   <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Est. Fuel Saving</p>
-                  <p style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#34d399', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <Leaf size={18} /> 100% Eco
-                  </p>
+                  <p style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#34d399', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Leaf size={18} /> 100% Eco</p>
                 </div>
               </div>
 
               <button onClick={handleOptimize} disabled={isOptimizing || inventory.length === 0} className="glow-button" style={{ background: 'linear-gradient(90deg, #10b981, #059669)' }}>
-                {isOptimizing ? (
-                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-                    <Cpu size={20} />
-                  </motion.div>
-                ) : (
-                  <Cpu size={20} />
-                )}
+                {isOptimizing ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}><Cpu size={20} /></motion.div> : <Cpu size={20} />}
                 {isOptimizing ? 'Generating Eco Route...' : 'Run Bike Optimization'}
               </button>
             </motion.div>
           ) : (
-            <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }}
-              className="glass-panel"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass-panel">
               <h2 className="panel-title"><Truck color="#34d399" /> Truck Configuration</h2>
               <label style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
                 Maximum Capacity (kg): <strong>{capacity}</strong>
@@ -164,38 +162,29 @@ export default function NGODashboard() {
                 value={capacity} onChange={(e) => setCapacity(Number(e.target.value))}
                 className="input-range"
               />
-              
               <button onClick={handleOptimize} disabled={isOptimizing || inventory.length === 0} className="glow-button">
-                {isOptimizing ? (
-                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-                    <Cpu size={20} />
-                  </motion.div>
-                ) : (
-                  <Cpu size={20} />
-                )}
+                {isOptimizing ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}><Cpu size={20} /></motion.div> : <Cpu size={20} />}
                 {isOptimizing ? 'Running Quantum Optimization...' : 'Run Optimization'}
               </button>
             </motion.div>
           )}
 
           <div className="glass-panel">
-            <h2 className="panel-title">Nearest Location Available Donations</h2>
+            <h2 className="panel-title">Active Donations (10km Radius)</h2>
             <div className="inventory-list">
-              {inventory.length === 0 ? <p style={{color: '#94a3b8'}}>No active donations in your city.</p> : null}
+              {inventory.length === 0 ? <p style={{color: '#94a3b8'}}>No active donations in radius.</p> : null}
               {inventory.map(item => (
                 <div key={item._id} className="inventory-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '0.5rem' }}>
                     <p className="item-name">{item.foodName}</p>
-                    <div className={`badge ${item.expectedExpiryHours <= 24 ? 'badge-danger' : 'badge-safe'}`}>
-                      {item.expectedExpiryHours}h left
-                    </div>
+                    <div className={`badge ${item.expectedExpiryHours <= 24 ? 'badge-danger' : 'badge-safe'}`}>{item.expectedExpiryHours}h left</div>
                   </div>
                   <p className="item-meta">Weight: {item.weight}kg | AI Nutri-Score: {item.nutritionScore}</p>
                   <p className="item-meta" style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.25rem' }}>
                     <Clock size={10} style={{display:'inline'}}/> Listed: {new Date(item.createdAt).toLocaleString()}
                   </p>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.75rem', color: '#60a5fa', fontSize: '0.8rem' }}>
-                    <MapPin size={12} /> {item.providerName} - {item.addressLine}, {item.city} {item.pincode}
+                    <MapPin size={12} /> {item.providerName} - {item.distance}m away
                   </div>
                 </div>
               ))}
@@ -219,9 +208,7 @@ export default function NGODashboard() {
                 </div>
                 <div className="stat-card">
                   <p className="stat-label">Total Load</p>
-                  <p className="stat-value text-emerald">
-                    {totalWeight} / {isBikeRecommended ? 10 : capacity} kg
-                  </p>
+                  <p className="stat-value text-emerald">{totalWeight} / {isBikeRecommended ? 10 : capacity} kg</p>
                 </div>
                 <div className="stat-card">
                   <p className="stat-label">High-Risk Saved</p>
@@ -244,11 +231,7 @@ export default function NGODashboard() {
           ) : (
             <div className="glass-panel empty-state">
               <AlertTriangle size={48} style={{ opacity: 0.5, marginBottom: '1rem' }} />
-              <p>
-                {isBikeRecommended 
-                  ? "Run the bike optimization engine to generate your eco-friendly pickup manifest." 
-                  : "Configure truck capacity and run the optimization engine to generate a pickup manifest."}
-              </p>
+              <p>{isBikeRecommended ? "Run the bike optimization engine to generate your eco-friendly pickup manifest and view routing." : "Configure capacity and run the optimization engine to generate a pickup manifest and routing."}</p>
             </div>
           )}
         </div>

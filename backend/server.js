@@ -13,7 +13,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/quantum_knapsack')
   .then(() => console.log('MongoDB Connected successfully!'))
   .catch(err => console.error('MongoDB connection error:', err));
@@ -54,14 +53,12 @@ app.post('/api/analyze-food', async (req, res) => {
       throw new Error("MISTRAL_API_KEY is missing from .env");
     }
 
-    // 1. Setup LangChain with Mistral Model
     const llm = new ChatMistralAI({
       model: "mistral-small-latest",
       temperature: 0.1, 
       apiKey: process.env.MISTRAL_API_KEY
     });
 
-    // CRITICAL FIX: Use double curly braces {{ }} to escape JSON in PromptTemplate
     const template = `
     You are a professional food science AI.
     Determine the average nutrition score (1-100) and the TOTAL shelf life in hours for the following food item at room temperature.
@@ -79,14 +76,9 @@ app.post('/api/analyze-food', async (req, res) => {
     const chain = prompt.pipe(llm);
     
     console.log(`[AI Debug] 2. Calling Mistral API...`);
-    
-    // 2. Execute AI Call
     const response = await chain.invoke({ food: foodName });
-    
-    // 3. Log the Raw Response Object deeply
     console.log(`[AI Debug] 3. Mistral Raw Response Object:`, JSON.stringify(response, null, 2));
 
-    // 4. Safe Text Extraction
     let text = "";
     if (response && response.content) {
       text = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
@@ -98,10 +90,8 @@ app.post('/api/analyze-food', async (req, res) => {
     
     console.log(`\n[AI Debug] 4. Extracted AI Text:\n${text}\n`);
 
-    // 5. Clean and Parse JSON securely
     let cleanedText = text;
     if (cleanedText) {
-      // Safely strip markdown code blocks
       cleanedText = cleanedText.replace(/```json/gi, '').replace(/```/g, '').trim();
     }
     
@@ -122,7 +112,6 @@ app.post('/api/analyze-food', async (req, res) => {
       throw new Error("Mistral returned invalid or missing numbers for nutrition or shelf life.");
     }
 
-    // 6. Dynamic Time Calculation based on Provider's provided timestamp
     const createdDate = new Date(createdAt);
     const currentDate = new Date();
     
@@ -135,7 +124,6 @@ app.post('/api/analyze-food', async (req, res) => {
     console.log(`[AI Debug] 7. Time Math: Total Life (${totalShelfLifeHours}h) - Elapsed (${diffInHours.toFixed(1)}h) = Remaining (${remainingHours}h)`);
     console.log(`=========================================\n`);
 
-    // 7. Return actual dynamic AI generation
     res.json({
       nutritionScore,
       expectedExpiryHours: remainingHours
@@ -146,11 +134,8 @@ app.post('/api/analyze-food', async (req, res) => {
     if (error.response && error.response.data) {
        console.error(`[Mistral API Data]:`, error.response.data);
     }
-    
     console.log(`[AI Debug] Fallback Reason: API genuinely failed, threw invalid JSON, or timed out.`);
     console.log(`=========================================\n`);
-    
-    // Safe Fallback ONLY executed if the API genuinely crashes
     res.json({ nutritionScore: 50, expectedExpiryHours: 48 });
   }
 });
@@ -193,20 +178,21 @@ app.delete('/api/food/:id', async (req, res) => {
   }
 });
 
-// --- QUANTUM OPTIMIZATION ROUTE ---
+// --- QUANTUM OPTIMIZATION ROUTE (Distance-Aware) ---
 app.post('/api/optimize', async (req, res) => {
-  const { capacity } = req.body;
+  const { capacity, items } = req.body;
   try {
-    const inventory = await Food.find();
-    
+    // We now rely on the pre-filtered items array sent by the NGO Dashboard 
+    // to preserve radius filtering and distance calculations.
     const payload = {
       capacity: capacity,
-      items: inventory.map(item => ({
+      items: items.map(item => ({
         id: item._id.toString(),
         name: item.foodName,
         weight: item.weight,
         nutrition: item.nutritionScore,
-        expiry_hours: item.expectedExpiryHours
+        expiry_hours: item.expectedExpiryHours,
+        distance: item.distance || 1
       }))
     };
 
@@ -217,7 +203,7 @@ app.post('/api/optimize', async (req, res) => {
     }
 
     const selectedIds = quantumRes.data.selected_ids;
-    const selectedFoods = inventory.filter(item => selectedIds.includes(item._id.toString()));
+    const selectedFoods = items.filter(item => selectedIds.includes(item._id.toString()));
     
     res.json(selectedFoods);
   } catch (error) {

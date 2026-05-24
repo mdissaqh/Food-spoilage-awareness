@@ -13,7 +13,9 @@ export default function ProviderDashboard() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiData, setAiData] = useState(null);
   
-  // Format current datetime for initial state
+  // NEW: GPS Location State
+  const [gpsLocation, setGpsLocation] = useState({ latitude: null, longitude: null });
+
   const getLocalDate = () => new Date().toISOString().split('T')[0];
   const getLocalTime = () => new Date().toTimeString().slice(0, 5);
 
@@ -42,6 +44,19 @@ export default function ProviderDashboard() {
       setUser(parsedUser);
       fetchInventory(parsedUser._id);
     }
+
+    // Auto-capture GPS location on mount
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setGpsLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+        (err) => {
+          console.error("GPS access denied or failed, defaulting to Bangalore center.", err);
+          setGpsLocation({ latitude: 12.9716, longitude: 77.5946 });
+        }
+      );
+    } else {
+      setGpsLocation({ latitude: 12.9716, longitude: 77.5946 });
+    }
   }, [navigate, fetchInventory]);
 
   const handleLogout = () => {
@@ -57,9 +72,7 @@ export default function ProviderDashboard() {
     
     setIsAnalyzing(true);
     try {
-      // Combine date and time to ISO format for the backend
       const combinedDateTime = new Date(`${newItem.createdDate}T${newItem.createdTime}`).toISOString();
-
       const res = await api.post('/analyze-food', { 
         foodName: newItem.foodName,
         createdAt: combinedDateTime
@@ -81,7 +94,12 @@ export default function ProviderDashboard() {
         weight: Number(newItem.weight),
         createdAt: combinedDateTime,
         nutritionScore: aiData.nutritionScore,
-        expectedExpiryHours: aiData.expectedExpiryHours, // This is dynamic remaining hours
+        expectedExpiryHours: aiData.expectedExpiryHours,
+        
+        // Include silently captured GPS coordinates
+        latitude: gpsLocation.latitude || 12.9716,
+        longitude: gpsLocation.longitude || 77.5946,
+
         providerId: user._id,
         providerName: user.organizationName,
         addressLine: user.addressLine,
@@ -94,12 +112,7 @@ export default function ProviderDashboard() {
       
       setIsAdding(false);
       setAiData(null);
-      setNewItem({ 
-        foodName: '', 
-        weight: '', 
-        createdDate: getLocalDate(), 
-        createdTime: getLocalTime() 
-      });
+      setNewItem({ foodName: '', weight: '', createdDate: getLocalDate(), createdTime: getLocalTime() });
       fetchInventory(user._id);
     } catch (err) {
       console.error("Failed to add item", err);
@@ -118,12 +131,7 @@ export default function ProviderDashboard() {
   const cancelAdding = () => {
     setIsAdding(!isAdding);
     setAiData(null);
-    setNewItem({ 
-      foodName: '', 
-      weight: '', 
-      createdDate: getLocalDate(), 
-      createdTime: getLocalTime() 
-    });
+    setNewItem({ foodName: '', weight: '', createdDate: getLocalDate(), createdTime: getLocalTime() });
   };
 
   if (!user) return null;
@@ -152,50 +160,32 @@ export default function ProviderDashboard() {
           <div className="add-form" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <input 
-                required 
-                type="text" 
-                placeholder="Food Name (e.g., Milk, Pizza)" 
-                className="form-input" 
-                value={newItem.foodName} 
-                onChange={e => setNewItem({...newItem, foodName: e.target.value})} 
-                disabled={aiData !== null}
+                required type="text" placeholder="Food Name (e.g., Milk, Pizza)" 
+                className="form-input" value={newItem.foodName} 
+                onChange={e => setNewItem({...newItem, foodName: e.target.value})} disabled={aiData !== null}
               />
               <input 
-                required 
-                type="number" 
-                placeholder="Total Weight (kg)" 
-                className="form-input" 
-                value={newItem.weight} 
-                onChange={e => setNewItem({...newItem, weight: e.target.value})} 
-                disabled={aiData !== null}
+                required type="number" placeholder="Total Weight (kg)" 
+                className="form-input" value={newItem.weight} 
+                onChange={e => setNewItem({...newItem, weight: e.target.value})} disabled={aiData !== null}
               />
               <input 
-                required 
-                type="date" 
-                className="form-input" 
+                required type="date" className="form-input" 
                 value={newItem.createdDate} 
-                onChange={e => setNewItem({...newItem, createdDate: e.target.value})} 
-                disabled={aiData !== null}
+                onChange={e => setNewItem({...newItem, createdDate: e.target.value})} disabled={aiData !== null}
               />
               <input 
-                required 
-                type="time" 
-                className="form-input" 
+                required type="time" className="form-input" 
                 value={newItem.createdTime} 
-                onChange={e => setNewItem({...newItem, createdTime: e.target.value})} 
-                disabled={aiData !== null}
+                onChange={e => setNewItem({...newItem, createdTime: e.target.value})} disabled={aiData !== null}
               />
             </div>
 
             {!aiData ? (
               <button onClick={handleAnalyze} disabled={isAnalyzing} className="glow-button">
                 {isAnalyzing ? (
-                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-                    <Cpu size={20} />
-                  </motion.div>
-                ) : (
-                  <Cpu size={20} />
-                )}
+                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}><Cpu size={20} /></motion.div>
+                ) : <Cpu size={20} />}
                 {isAnalyzing ? 'Mistral AI Analyzing...' : 'Analyze with AI'}
               </button>
             ) : (

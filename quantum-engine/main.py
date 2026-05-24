@@ -11,6 +11,7 @@ class FoodItem(BaseModel):
     weight: float
     nutrition: float
     expiry_hours: int
+    distance: float
 
 class OptimizeRequest(BaseModel):
     capacity: float
@@ -23,16 +24,18 @@ def optimize_knapsack(req: OptimizeRequest):
 
     # Initialize Constrained Quadratic Model
     cqm = dimod.ConstrainedQuadraticModel()
-    
-    # Create binary variables for each food item (1 if loaded, 0 if left behind)
     x = {item.id: dimod.Binary(item.id) for item in req.items}
     
-    # Objective: Maximize Priority = Nutrition / Remaining Expiry Hours
-    # We minimize the negative value because CQM minimizes energy by default
-    objective = sum(- (item.nutrition / max(item.expiry_hours, 1)) * x[item.id] for item in req.items)
+    # NEW OBJECTIVE: Maximize Priority = (Nutrition * Weight) / (ExpiryHours * Distance)
+    # We minimize the negative value because CQM minimizes energy by default.
+    # Prevent division by zero using max(val, 1)
+    objective = sum(
+        - ((item.nutrition * item.weight) / (max(item.expiry_hours, 1) * max(item.distance, 1))) * x[item.id] 
+        for item in req.items
+    )
     cqm.set_objective(objective)
     
-    # Constraint: Total weight <= Truck Capacity
+    # Constraint: Total weight <= Truck/Bike Capacity
     cqm.add_constraint(sum(item.weight * x[item.id] for item in req.items) <= req.capacity, label='capacity')
     
     # Convert to Binary Quadratic Model (BQM)
@@ -41,15 +44,14 @@ def optimize_knapsack(req: OptimizeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to build quantum model.")
 
-    # Solve using Simulated Annealing (Quantum-Inspired)
+    # Solve using Simulated Annealing
     sampler = neal.SimulatedAnnealingSampler()
     sampleset = sampler.sample(bqm, num_reads=100) 
     
-    # Extract the best valid sample that satisfies the weight constraint
     feasible_samples = [s for s in sampleset.data(name='sample') if cqm.check_feasible(s.sample)]
     
     if not feasible_samples:
-        return {"error": "No valid combination fits in this truck capacity."}
+        return {"error": "No valid combination fits in this vehicle capacity."}
         
     best_sample = feasible_samples[0].sample
     selected_ids = [item_id for item_id, selected in best_sample.items() if selected == 1]
